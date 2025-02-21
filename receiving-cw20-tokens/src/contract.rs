@@ -1,6 +1,6 @@
 #[cfg(not(feature = "library"))]
 use cosmwasm_std::entry_point;
-use cosmwasm_std::{Binary, Deps, DepsMut, Env, MessageInfo, Response, StdResult, Addr};
+use cosmwasm_std::{to_json_binary, Binary, Deps, DepsMut, Env, MessageInfo, Response, StdResult, Addr, QueryResponse, StdError};
 // use cw2::set_contract_version;
 
 use crate::error::ContractError;
@@ -96,9 +96,25 @@ pub mod execute {
 }
 
 #[cfg_attr(not(feature = "library"), entry_point)]
-pub fn query(_deps: Deps, _env: Env, _msg: QueryMsg) -> StdResult<Binary> {
-    unimplemented!()
+pub fn query(deps: Deps, _env: Env, msg: QueryMsg) -> StdResult<Binary> {
+    match msg {
+        QueryMsg::GetAdmin {} => query::get_admin(deps),
+    }
+}
+
+pub mod query {
+    use super::*;
+    use crate::msg::AdminResponse;
+
+    pub fn get_admin(deps: Deps) -> Result<QueryResponse, StdError> {
+        let config = CONFIG.load(deps.storage)?;
+
+        let admin = config.admin.to_string();
+        to_json_binary(&AdminResponse { admin })
+    }
 }
 
 #[cfg(test)]
-mod tests {}
+mod tests {
+    
+}

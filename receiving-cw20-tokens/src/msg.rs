@@ -20,4 +20,12 @@ pub enum ReceiveMsg {
 
 #[cw_serde]
 #[derive(QueryResponses)]
-pub enum QueryMsg {}
+pub enum QueryMsg {
+    #[returns(AdminResponse)]
+    GetAdmin {},
+}
+
+#[cw_serde]
+pub struct AdminResponse {
+    pub admin: String,
+}
