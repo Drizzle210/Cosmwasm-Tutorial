@@ -64,7 +64,7 @@ pub mod execute {
         let mut balance= BALANCE_OF.load(deps.storage, info.sender.clone()).unwrap_or(Uint128::zero());
         let balance_of = get_token_balance_of(&deps, info.sender.clone(), token_info.token_address.clone())?;
 
-        if(total_supply.is_zero()) {
+        if total_supply.is_zero() {
             shares += amount;
         } else {
             shares+=amount.checked_mul(total_supply).map_err(StdError::overflow)?.checked_div(balance_of).map_err(StdError::divide_by_zero)?
@@ -127,11 +127,11 @@ pub mod execute {
         let query_msg = cw20::Cw20QueryMsg::Balance {
             address: user_address.to_string(),
         };
-        let msg=deps.querier.query(&QueryRequest::Wasm(WasmQuery::Smart { 
+        let msg: cw20::BalanceResponse = deps.querier.query(&QueryRequest::Wasm(WasmQuery::Smart { 
             contract_addr: cw20_contract_addr.to_string(), 
             msg: to_json_binary(&query_msg)? 
         }))?;
-        Ok(msg)
+        Ok(msg.balance)
     }
 
     pub fn give_allowance(
@@ -178,4 +178,130 @@ pub mod query {
 }
 
 #[cfg(test)]
-mod tests {}
+mod tests {
+    use cosmwasm_std::{Addr, Uint128};
+    use cw_multi_test::{App, BankKeeper, ContractWrapper, Executor, IntoAddr};
+
+    use cw20::{Cw20Coin, Cw20ExecuteMsg, Cw20QueryMsg};
+    use cw20_base::msg::InstantiateMsg as Cw20InstantiateMsg;
+
+
+    use super::*;
+
+    fn setup_cw20_contract(app: &mut App, owner: Addr) -> Addr {
+        let cw20_code = ContractWrapper::new(
+            cw20_base::contract::execute,
+            cw20_base::contract::instantiate,
+            cw20_base::contract::query,
+        );
+        let cw20_code_id = app.store_code(Box::new(cw20_code));
+
+        let cw20_addr = app
+            .instantiate_contract(
+                cw20_code_id,
+                owner.clone(),
+                &Cw20InstantiateMsg {
+                    name: "Test Token".to_string(),
+                    symbol: "TTK".to_string(),
+                    decimals: 6,
+                    initial_balances: vec![Cw20Coin {
+                        address: owner.to_string(),
+                        amount: Uint128::new(1000000),
+                    }],
+                    mint: None,
+                    marketing: None,
+                },
+                &[],
+                "CW20 Test Token",
+                None,
+            )
+            .unwrap();
+        cw20_addr
+    }
+
+    fn setup_vault_contract(app: &mut App, owner: Addr, cw20_addr: Addr) -> Addr {
+        let vault_code = ContractWrapper::new(execute, instantiate, query);
+        let vault_code_id = app.store_code(Box::new(vault_code));
+
+        let vault_addr = app
+            .instantiate_contract(
+                vault_code_id,
+                owner.clone(),
+                &InstantiateMsg {
+                    token_symbol: "TTK".to_string(),
+                    token_contract_address: cw20_addr.clone(),
+                },
+                &[],
+                "Token Vault",
+                None,
+            )
+            .unwrap();
+        vault_addr
+    }
+
+    #[test]
+    fn test_deposit_cw20_token() {
+        let mut app = App::default();
+        let owner = app.api().addr_make("owner");
+
+        // Step 1: Setup CW20 Token Contract
+        let cw20_addr = setup_cw20_contract(&mut app, owner.clone());
+
+        // Step 2: Setup Vault Contract
+        let vault_addr = setup_vault_contract(&mut app, owner.clone(), cw20_addr.clone());
+
+        // Step 3: Approve Vault Contract to Spend Tokens
+        app.execute_contract(
+            owner.clone(),
+            cw20_addr.clone(),
+            &Cw20ExecuteMsg::IncreaseAllowance {
+                spender: vault_addr.to_string(),
+                amount: Uint128::new(500),
+                expires: None,
+            },
+            &[],
+        )
+        .unwrap();
+
+        // Step 4: Deposit Tokens into Vault
+        let response = app
+            .execute_contract(
+                owner.clone(),
+                vault_addr.clone(),
+                &ExecuteMsg::Deposit {
+                    amount: Uint128::new(500),
+                },
+                &[],
+            )
+            .unwrap();
+
+        assert!(response.events.iter().any(|e| e.ty == "wasm" && e.attributes.iter().any(|attr| attr.key == "action" && attr.value == "deposit")));
+
+        // Step 5: Query Vault Balance
+        let vault_balance: cw20::BalanceResponse = app
+            .wrap()
+            .query_wasm_smart(
+                &cw20_addr,
+                &Cw20QueryMsg::Balance {
+                    address: vault_addr.to_string(),
+                },
+            )
+            .unwrap();
+
+        assert_eq!(vault_balance.balance, Uint128::new(500));
+
+        // Step 6: Query User Shares in Vault
+        let user_shares: Uint128 = app
+            .wrap()
+            .query_wasm_smart(
+                &vault_addr,
+                &QueryMsg::GetBalanceOf {
+                    address: owner.clone(),
+                },
+            )
+            .unwrap();
+
+        assert_eq!(user_shares, Uint128::new(500));
+    }
+}
+
