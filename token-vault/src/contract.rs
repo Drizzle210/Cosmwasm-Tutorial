@@ -70,7 +70,7 @@ pub mod execute {
             shares+=amount.checked_mul(total_supply).map_err(StdError::overflow)?.checked_div(balance_of).map_err(StdError::divide_by_zero)?
         };
 
-        give_allowance(env.clone(), info.clone(), amount, token_info.token_address.clone())?;
+        // give_allowance(env.clone(), info.clone(), amount, token_info.token_address.clone())?;
         total_supply += shares;
         TOTAL_SUPPLY.save(deps.storage, &total_supply)?;
         balance += shares;
