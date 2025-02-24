@@ -303,5 +303,80 @@ mod tests {
 
         assert_eq!(user_shares, Uint128::new(500));
     }
+
+    fn test_withdraw_cw20_token() {
+        let mut app = App::default();
+        let owner = app.api().addr_make("owner");
+
+        // Step 1: Setup CW20 Token Contract
+        let cw20_addr = setup_cw20_contract(&mut app, owner.clone());
+
+        // Step 2: Setup Vault Contract
+        let vault_addr = setup_vault_contract(&mut app, owner.clone(), cw20_addr.clone());
+
+        // Step 3: Approve Vault Contract to Spend Tokens
+        app.execute_contract(
+            owner.clone(),
+            cw20_addr.clone(),
+            &Cw20ExecuteMsg::IncreaseAllowance {
+                spender: vault_addr.to_string(),
+                amount: Uint128::new(500),
+                expires: None,
+            },
+            &[],
+        )
+        .unwrap();
+
+        // Step 4: Deposit Tokens into Vault
+        app.execute_contract(
+            owner.clone(),
+            vault_addr.clone(),
+            &ExecuteMsg::Deposit {
+                amount: Uint128::new(500),
+            },
+            &[],
+        )
+        .unwrap();
+
+        // Step 5: Withdraw Tokens from Vault
+        let response = app
+            .execute_contract(
+                owner.clone(),
+                vault_addr.clone(),
+                &ExecuteMsg::Withdraw {
+                    shares: Uint128::new(500),
+                },
+                &[],
+            )
+            .unwrap();
+
+        assert!(response.events.iter().any(|e| e.ty == "wasm" && e.attributes.iter().any(|attr| attr.key == "action" && attr.value == "withdraw")));
+
+        // Step 6: Query Vault Balance
+        let vault_balance: cw20::BalanceResponse = app
+            .wrap()
+            .query_wasm_smart(
+                &cw20_addr,
+                &Cw20QueryMsg::Balance {
+                    address: vault_addr.to_string(),
+                },
+            )
+            .unwrap();
+
+        assert_eq!(vault_balance.balance, Uint128::new(0));
+
+        // Step 7: Query User Shares in Vault
+        let user_shares: Uint128 = app
+            .wrap()
+            .query_wasm_smart(
+                &vault_addr,
+                &QueryMsg::GetBalanceOf {
+                    address: owner.clone(),
+                },
+            )
+            .unwrap();
+
+        assert_eq!(user_shares, Uint128::new(0));
+    }
 }
 
